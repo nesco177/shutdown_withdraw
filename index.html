@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shutdown / Withdraw Message</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f1f5f9;color:#0f172a}
+  .wrap{max-width:560px;margin:0 auto;padding:14px}
+  h1{font-size:20px;margin:6px 0 4px}
+  .status{font-size:12px;color:#64748b;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+  .card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .card h2{font-size:15px;margin:0 0 8px;display:flex;justify-content:space-between;align-items:center}
+  .card h3{font-size:13px;margin:12px 0 4px;color:#475569;display:flex;justify-content:space-between;align-items:center}
+  label.row{display:flex;align-items:center;gap:10px;padding:9px 6px;border-bottom:1px solid #eef2f7;font-size:16px}
+  label.row:last-child{border-bottom:0}
+  input[type=checkbox]{width:22px;height:22px;flex:none}
+  input[type=time]{width:100%;padding:10px;font-size:16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff}
+  .tabs{display:flex;gap:8px}
+  .tabs button{flex:1;padding:12px;font-size:16px;border-radius:10px;border:2px solid #cbd5e1;background:#fff;font-weight:600}
+  .tabs button.on.sd{background:#dc2626;border-color:#dc2626;color:#fff}
+  .tabs button.on.wd{background:#16a34a;border-color:#16a34a;color:#fff}
+  .send{width:100%;padding:16px;font-size:18px;font-weight:700;border:0;border-radius:12px;background:#25d366;color:#fff;margin-bottom:8px}
+  .send.auto{background:#0f172a}
+  .send.save{background:#475569}
+  .small{font-size:13px;padding:5px 10px;border-radius:8px;border:1px solid #cbd5e1;background:#f8fafc}
+  pre{white-space:pre-wrap;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:10px;font-size:14px;margin:0}
+  .hint{font-size:12px;color:#64748b;text-align:center}
+  .empty{font-size:13px;color:#94a3b8;padding:6px}
+  .rectitle{font-size:13px;color:#475569;margin:14px 0 6px;font-weight:600}
+  .rec{display:flex;align-items:center;gap:8px;border:2px solid #e2e8f0;border-radius:10px;padding:9px 10px;margin-bottom:6px;background:#fff}
+  .rec.on{border-color:#16a34a;background:#f0fdf4}
+  .rec .rs{font-size:12px;color:#64748b;margin-top:2px}
+  .rec>div{flex:1}
+  .rec .del{border:0;background:none;color:#dc2626;font-size:18px;padding:4px 8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Shutdown / Withdraw</h1>
+  <div class="status"><span id="status">লোড হচ্ছে...</span><button class="small" onclick="load(true)">🔄 Refresh</button></div>
+
+  <div class="card">
+    <div class="tabs">
+      <button id="bSD" class="sd on" onclick="setMode('SD')">🔴 Shutdown</button>
+      <button id="bWD" class="wd" onclick="setMode('WD')">🟢 Withdraw</button>
+    </div>
+    <div class="rectitle">চালু Shutdown (Withdraw করতে সিলেক্ট করুন)</div>
+    <div id="recs"></div>
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+      <span>সময়:</span><input type="time" id="time"><button class="small" onclick="nowTime()">এখন</button>
+    </div>
+  </div>
+
+  <div class="card"><h2>Substation</h2><div id="subs"></div></div>
+  <div id="subDetails"></div>
+  <div class="card" id="rolesCard" style="display:none"><h2>Lineman / Others</h2><div id="roles"></div></div>
+
+  <div class="card"><h2>Message preview</h2><pre id="prev"></pre></div>
+
+  <button class="send auto" id="autoBtn" style="display:none" onclick="sendAuto()">সরাসরি গ্রুপে পাঠান</button>
+  <button class="send" onclick="sendWA()">WhatsApp এ পাঠান</button>
+  <div class="hint">WhatsApp খুলবে → গ্রুপ select করে Send চাপুন</div>
+  <button class="send save" style="margin-top:14px" onclick="saveOnly()">Save</button>
+</div>
+
+<script>
+
+const SHEET_ID   = "1aqNIKeJMKNASJsE_jweyqylGoXcxIVxNt4rj0H6nUqA";
+const SHEET_NAME = "Sheet1";
+const WEBHOOK_URL = "";      
+const SECRET = "";           
+
+
+let model={subs:{},roles:{}};
+let mode='SD';
+const sel=new Set();
+const subSel=new Set();
+
+
+let records=[];
+let activeId=null;
+try{ records=JSON.parse(localStorage.getItem('sdRecords'))||[] }catch(e){ records=[] }
+function saveRecords(){ try{ localStorage.setItem('sdRecords',JSON.stringify(records)) }catch(e){} }
+function nextNo(){ let n=1; const used=records.map(r=>r.no); while(used.includes(n))n++; return n }
+
+function parseCSV(t){
+  const rows=[];let r=[],c="",q=false;
+  for(let i=0;i<t.length;i++){
+    const ch=t[i];
+    if(q){ if(ch=='"'){ if(t[i+1]=='"'){c+='"';i++} else q=false } else c+=ch }
+    else{
+      if(ch=='"')q=true;
+      else if(ch==','){r.push(c);c=""}
+      else if(ch=='\n'){r.push(c);rows.push(r);r=[];c=""}
+      else if(ch!='\r')c+=ch;
+    }
+  }
+  if(c!==""||r.length){r.push(c);rows.push(r)}
+  return rows;
+}
+
+function buildModel(rows){
+  const m={subs:{},roles:{}};
+  if(!rows.length)return m;
+  const hdr=rows[0].map(s=>(s||"").trim());
+  const roleCols=[];
+  for(let i=3;i<hdr.length;i++){ if(hdr[i]){ roleCols.push([i,hdr[i]]); m.roles[hdr[i]]=[]; } }
+  let cur="";
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i].map(s=>(s||"").trim());
+    if(r[0]) cur=r[0];
+    if(cur){
+      if(!m.subs[cur]) m.subs[cur]={ssa:[],feeders:[]};
+      if(r[1]&&!m.subs[cur].ssa.includes(r[1])) m.subs[cur].ssa.push(r[1]);
+      if(r[2]&&!m.subs[cur].feeders.includes(r[2])) m.subs[cur].feeders.push(r[2]);
+    }
+    for(const [ci,role] of roleCols){
+      if(r[ci]&&!m.roles[role].includes(r[ci])) m.roles[role].push(r[ci]);
+    }
+  }
+  return m;
+}
+
+function cacheGet(){ try{ return JSON.parse(localStorage.getItem('sheetCache2')) }catch(e){ return null } }
+
+
+function fetchRows(){
+  return new Promise((resolve,reject)=>{
+    const cb='gv_'+Date.now();
+    const s=document.createElement('script');
+    const done=()=>{ clearTimeout(timer); delete window[cb]; s.remove(); };
+    const timer=setTimeout(()=>{ done(); reject(new Error('timeout')); },12000);
+    window[cb]=function(resp){
+      done();
+      if(!resp||resp.status!=='ok'||!resp.table){ reject(new Error('bad response')); return; }
+      const rows=[resp.table.cols.map(c=>(c.label||'').trim())];
+      resp.table.rows.forEach(r=>rows.push((r.c||[]).map(c=>(c&&c.v!=null)?String(c.v):'')));
+      resolve(rows);
+    };
+    s.onerror=()=>{ done(); reject(new Error('network')); };
+    s.src=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json;responseHandler:${cb}&headers=1&sheet=${encodeURIComponent(SHEET_NAME)}`;
+    document.head.appendChild(s);
+  });
+}
+
+
+async function load(force){
+  const st=document.getElementById('status');
+  const cached=cacheGet();
+
+  if(!force && cached && cached.rows){
+    model=buildModel(cached.rows);
+    st.textContent='সংরক্ষিত data ('+cached.at+') — নতুন আনতে Refresh চাপুন';
+    render();
+    return;
+  }
+
+  st.textContent='লোড হচ্ছে...';
+  try{
+    const rows=await fetchRows();
+    const m=buildModel(rows);
+    if(!Object.keys(m.subs).length)throw new Error('empty');
+    const at=new Date().toLocaleString('en-GB');
+    try{ localStorage.setItem('sheetCache2',JSON.stringify({rows,at})) }catch(e){}
+    model=m;
+    st.textContent='Google Sheet থেকে লোড হয়েছে ('+at+')';
+  }catch(e){
+    if(cached && cached.rows){
+      model=buildModel(cached.rows);
+      st.textContent='❌ Refresh হয়নি, সংরক্ষিত data ('+cached.at+') দেখাচ্ছে';
+    }else{
+      model={subs:{},roles:{}};
+      st.textContent='❌ Sheet লোড হয়নি ('+(e.message||'error')+') — internet দেখে Refresh চাপুন';
+    }
+  }
+  render();
+}
+
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function cb(key,label,checked){
+  return `<label class="row"><input type="checkbox" data-k="${esc(key)}" ${checked?'checked':''}><span>${esc(label)}</span></label>`;
+}
+
+function recSummary(r){
+  const f=r.sel.filter(k=>k.startsWith('F|')).map(k=>k.split('|').slice(2).join('|'));
+  return f.join(', ');
+}
+
+function renderRecords(){
+  const box=document.getElementById('recs');
+  if(!records.length){ box.innerHTML='<div class="empty">কোনো চালু Shutdown নেই</div>'; return }
+  records.sort((a,b)=>a.no-b.no);
+  box.innerHTML=records.map(r=>
+    `<div class="rec ${r.no===activeId?'on':''}" data-rec="${r.no}">
+      <div><b>Shutdown ${r.no}</b> : ${esc(recSummary(r))}</div>
+      <button class="del" data-del="${r.no}">✕</button>
+    </div>`).join('');
+}
+
+function render(){
+  const names=Object.keys(model.subs);
+  document.getElementById('subs').innerHTML=names.length
+    ? names.map(n=>`<label class="row"><input type="checkbox" data-sub="${esc(n)}" ${subSel.has(n)?'checked':''}><span>${esc(n)}</span></label>`).join('')
+    : '<div class="empty">কোনো substation পাওয়া যায়নি</div>';
+
+  let h='';
+  for(const n of names){
+    if(!subSel.has(n))continue;
+    const s=model.subs[n];
+    h+=`<div class="card"><h2>${esc(n)}</h2>`;
+    h+=`<h3>SSA <button class="small" data-all="A|${esc(n)}">সব</button></h3>`;
+    h+=s.ssa.length?s.ssa.map(x=>cb(`A|${n}|${x}`,x,sel.has(`A|${n}|${x}`))).join(''):'<div class="empty">নেই</div>';
+    h+=`<h3>Feeder <button class="small" data-all="F|${esc(n)}">সব</button></h3>`;
+    h+=s.feeders.length?s.feeders.map(x=>cb(`F|${n}|${x}`,x,sel.has(`F|${n}|${x}`))).join(''):'<div class="empty">নেই</div>';
+    h+='</div>';
+  }
+  document.getElementById('subDetails').innerHTML=h;
+
+  const roles=Object.keys(model.roles);
+  document.getElementById('rolesCard').style.display=roles.length?'block':'none';
+  document.getElementById('roles').innerHTML=roles.map(r=>{
+    const items=model.roles[r];
+    return `<h3>${esc(r)} <button class="small" data-all="R|${esc(r)}">সব</button></h3>`+
+      (items.length?items.map(x=>cb(`R|${r}|${x}`,x,sel.has(`R|${r}|${x}`))).join(''):'<div class="empty">নেই</div>');
+  }).join('');
+  renderRecords();
+  preview();
+}
+
+document.addEventListener('change',e=>{
+  const t=e.target;
+  if(t.dataset.sub!==undefined){
+    t.checked?subSel.add(t.dataset.sub):subSel.delete(t.dataset.sub);
+    render();
+  }else if(t.dataset.k!==undefined){
+    t.checked?sel.add(t.dataset.k):sel.delete(t.dataset.k);
+    preview();
+  }
+});
+
+document.addEventListener('click',e=>{
+  const del=e.target.closest('[data-del]');
+  if(del){
+    const no=+del.dataset.del;
+    if(confirm('Shutdown '+no+' তালিকা থেকে মুছবেন?')){
+      records=records.filter(r=>r.no!==no);
+      if(activeId===no){activeId=null;sel.clear();subSel.clear();}
+      saveRecords();render();
+    }
+    return;
+  }
+  const rec=e.target.closest('[data-rec]');
+  if(rec){
+    const no=+rec.dataset.rec;
+    if(activeId===no){ activeId=null;sel.clear();subSel.clear();render(); }
+    else{ applyRecord(no); setMode('WD'); }
+    return;
+  }
+  const all=e.target.closest('[data-all]');
+  if(all){
+    const p=all.dataset.all.split('|');
+    let keys=[];
+    if(p[0]==='R') keys=(model.roles[p[1]]||[]).map(x=>`R|${p[1]}|${x}`);
+    else{
+      const s=model.subs[p[1]]; if(!s)return;
+      keys=(p[0]==='A'?s.ssa:s.feeders).map(x=>`${p[0]}|${p[1]}|${x}`);
+    }
+    const allOn=keys.every(k=>sel.has(k));
+    keys.forEach(k=>allOn?sel.delete(k):sel.add(k));
+    render();
+  }
+});
+
+function applyRecord(no){
+  const r=records.find(x=>x.no===no); if(!r)return;
+  sel.clear(); r.sel.forEach(k=>sel.add(k));
+  subSel.clear(); r.subs.forEach(k=>subSel.add(k));
+  activeId=no;
+  render();
+}
+
+function setMode(m){
+  mode=m;
+  bSD.classList.toggle('on',m==='SD');bWD.classList.toggle('on',m==='WD');
+  nowTime();
+  if(m==='WD'){
+    if(activeId===null && records.length===1) applyRecord(records[0].no);   // একটাই থাকলে অটো সিলেক্ট
+  }else if(activeId!==null){
+    activeId=null;sel.clear();subSel.clear();render();
+  }
+  preview();
+}
+function nowTime(){
+  const d=new Date();
+  time.value=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  preview();
+}
+time.oninput=preview;
+
+
+function fmt12(t){
+  if(!t)return '--:--';
+  const p=t.split(':').map(Number);
+  const h=p[0]||0, m=p[1]||0;
+  const ap=h>=12?'PM':'AM';
+  const h12=h%12===0?12:h%12;
+  return String(h12).padStart(2,'0')+':'+String(m).padStart(2,'0')+' '+ap;
+}
+
+function tsFrom(t){
+  const p=(t||'0:0').split(':').map(Number);
+  const d=new Date(); d.setHours(p[0]||0,p[1]||0,0,0);
+  return d.getTime();
+}
+/* Shutdown থেকে Withdraw পর্যন্ত সময়, যেমন "1 h 5 min" */
+function interruption(r){
+  let start=r.ts;
+  if(start==null){                                   // পুরনো record এর জন্য
+    const dp=(r.date||'').split('/').map(Number);
+    const tp=(r.time||'0:0').split(':').map(Number);
+    start=new Date(dp[2],dp[1]-1,dp[0],tp[0],tp[1]).getTime();
+  }
+  let diff=tsFrom(time.value)-start;
+  if(diff<0) diff+=24*3600*1000;                     // মাঝরাত পার হলে
+  const total=Math.round(diff/60000);
+  const h=Math.floor(total/60), m=total%60;
+  return h>0 ? h+' h '+m+' min' : m+' min';
+}
+
+function picked(prefix,second,list){
+  return list.filter(x=>sel.has(`${prefix}|${second}|${x}`));
+}
+
+function buildMsg(){
+  const d=new Date().toLocaleDateString('en-GB');
+  let s=(mode==='SD'?'🔴 *SHUTDOWN*':'🟢 *WITHDRAW*')+'\n';
+  s+='Date: '+d+'  Time: '+fmt12(time.value)+'\n';
+  let intr='';
+  if(mode==='WD'&&activeId!==null){
+    const r=records.find(x=>x.no===activeId);
+    if(r) intr=interruption(r);
+  }
+  for(const n of Object.keys(model.subs)){
+    if(!subSel.has(n))continue;
+    const ss=picked('A',n,model.subs[n].ssa);
+    const fd=picked('F',n,model.subs[n].feeders);
+    const sep=(mode==='SD')?': ':' : ';   // Shutdown এ "Substation:", Withdraw এ "Substation :"
+    s+='\nSubstation'+sep+n+'\n';
+    s+='SSA'+sep+(ss.length?ss.join(', '):'-')+'\n\n';
+    s+='*Feeder : '+(fd.length?fd.join(', '):'-')+'*\n';
+    if(intr) s+='*Interruption Time : '+intr+'*\n';
+  }
+  const roleLines=[];
+  for(const r of Object.keys(model.roles)){
+    const p=picked('R',r,model.roles[r]);
+    if(p.length) roleLines.push('*'+r+' : '+p.join(', ')+'*');
+  }
+  if(roleLines.length) s+='\n'+roleLines.join('\n')+'\n';
+  return s.trim();
+}
+
+function preview(){
+  document.getElementById('prev').textContent=buildMsg();
+}
+
+function valid(){
+  let any=false;
+  for(const n of Object.keys(model.subs)){
+    if(subSel.has(n)&&picked('F',n,model.subs[n].feeders).length)any=true;
+  }
+  if(!any){alert('Substation ও কমপক্ষে একটি feeder tick দিন');return false}
+  if(!time.value)nowTime();
+  return true;
+}
+
+
+function afterSend(){
+  if(mode==='SD'){
+    records.push({
+      no:nextNo(),
+      date:new Date().toLocaleDateString('en-GB'),
+      time:time.value,
+      ts:tsFrom(time.value),
+      sel:[...sel],
+      subs:[...subSel]
+    });
+  }else if(activeId!==null){
+    records=records.filter(r=>r.no!==activeId);
+  }
+  activeId=null;
+  saveRecords();
+  sel.clear();subSel.clear();
+  nowTime();
+  render();
+}
+
+
+function saveOnly(){
+  if(!valid())return;
+  const q=(mode==='SD')
+    ? 'Shutdown '+nextNo()+' হিসেবে save করবেন? (কোনো message যাবে না)'
+    : (activeId!==null
+        ? 'Shutdown '+activeId+' Withdraw হিসেবে তালিকা থেকে বাদ দেবেন? (কোনো message যাবে না)'
+        : 'কোনো Shutdown সিলেক্ট করা নেই, তাই কিছু save হবে না।');
+  if(mode==='WD'&&activeId===null){alert(q);return}
+  if(!confirm(q))return;
+  afterSend();
+}
+
+function sendWA(){
+  if(!valid())return;
+  const msg=buildMsg();
+  afterSend();
+  window.location.href='https://wa.me/?text='+encodeURIComponent(msg);
+}
+
+async function sendAuto(){
+  if(!valid())return;
+  if(!confirm('গ্রুপে message পাঠাবেন?'))return;
+  const msg=buildMsg();
+  try{
+    await fetch(WEBHOOK_URL,{
+      method:'POST',mode:'no-cors',
+      body:new URLSearchParams({secret:SECRET,message:msg})
+    });
+    afterSend();
+    alert('✅ পাঠানো হয়েছে');
+  }catch(e){alert('❌ পাঠানো যায়নি')}
+}
+
+if(WEBHOOK_URL) document.getElementById('autoBtn').style.display='block';
+nowTime();
+load();
+</script>
+</body>
+</html>
