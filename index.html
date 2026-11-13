@@ -31,7 +31,6 @@
   .rectitle{font-size:13px;color:#475569;margin:14px 0 6px;font-weight:600}
   .rec{display:flex;align-items:center;gap:8px;border:2px solid #e2e8f0;border-radius:10px;padding:9px 10px;margin-bottom:6px;background:#fff}
   .rec.on{border-color:#16a34a;background:#f0fdf4}
-  .rec .rs{font-size:12px;color:#64748b;margin-top:2px}
   .rec>div{flex:1}
   .rec .del{border:0;background:none;color:#dc2626;font-size:18px;padding:4px 8px}
 </style>
@@ -49,7 +48,9 @@
     <div class="rectitle">চালু Shutdown (Withdraw করতে সিলেক্ট করুন)</div>
     <div id="recs"></div>
     <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
-      <span>সময়:</span><input type="time" id="time"><button class="small" onclick="nowTime()">এখন</button>
+      <span>সময়:</span>
+      <input type="time" id="time">
+      <button class="small" onclick="nowTime()">এখন</button>
     </div>
   </div>
 
@@ -66,24 +67,43 @@
 </div>
 
 <script>
-
 const SHEET_ID   = "1aqNIKeJMKNASJsE_jweyqylGoXcxIVxNt4rj0H6nUqA";
 const SHEET_NAME = "Sheet1";
-const WEBHOOK_URL = "";      
-const SECRET = "";           
-
+const WEBHOOK_URL = "";
+const SECRET = "";
 
 let model={subs:{},roles:{}};
 let mode='SD';
 const sel=new Set();
 const subSel=new Set();
 
-
 let records=[];
 let activeId=null;
 try{ records=JSON.parse(localStorage.getItem('sdRecords'))||[] }catch(e){ records=[] }
 function saveRecords(){ try{ localStorage.setItem('sdRecords',JSON.stringify(records)) }catch(e){} }
 function nextNo(){ let n=1; const used=records.map(r=>r.no); while(used.includes(n))n++; return n }
+
+function nowTime(){
+  const d=new Date();
+  time.value=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  preview();
+}
+time.oninput=preview;
+
+function fmt12(t){
+  if(!t)return '--:--';
+  const p=t.split(':').map(Number);
+  const h=p[0]||0, m=p[1]||0;
+  const ap=h>=12?'PM':'AM';
+  const h12=h%12===0?12:h%12;
+  return String(h12).padStart(2,'0')+':'+String(m).padStart(2,'0')+' '+ap;
+}
+
+function stamp(){
+  const d=new Date();
+  const t=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+  return d.toLocaleDateString('en-GB')+' '+fmt12(t);
+}
 
 function parseCSV(t){
   const rows=[];let r=[],c="",q=false;
@@ -125,7 +145,6 @@ function buildModel(rows){
 
 function cacheGet(){ try{ return JSON.parse(localStorage.getItem('sheetCache2')) }catch(e){ return null } }
 
-
 function fetchRows(){
   return new Promise((resolve,reject)=>{
     const cb='gv_'+Date.now();
@@ -145,7 +164,6 @@ function fetchRows(){
   });
 }
 
-
 async function load(force){
   const st=document.getElementById('status');
   const cached=cacheGet();
@@ -162,7 +180,7 @@ async function load(force){
     const rows=await fetchRows();
     const m=buildModel(rows);
     if(!Object.keys(m.subs).length)throw new Error('empty');
-    const at=new Date().toLocaleString('en-GB');
+    const at=stamp();
     try{ localStorage.setItem('sheetCache2',JSON.stringify({rows,at})) }catch(e){}
     model=m;
     st.textContent='Google Sheet থেকে লোড হয়েছে ('+at+')';
@@ -286,27 +304,11 @@ function setMode(m){
   bSD.classList.toggle('on',m==='SD');bWD.classList.toggle('on',m==='WD');
   nowTime();
   if(m==='WD'){
-    if(activeId===null && records.length===1) applyRecord(records[0].no);   // একটাই থাকলে অটো সিলেক্ট
+    if(activeId===null && records.length===1) applyRecord(records[0].no);
   }else if(activeId!==null){
     activeId=null;sel.clear();subSel.clear();render();
   }
   preview();
-}
-function nowTime(){
-  const d=new Date();
-  time.value=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
-  preview();
-}
-time.oninput=preview;
-
-
-function fmt12(t){
-  if(!t)return '--:--';
-  const p=t.split(':').map(Number);
-  const h=p[0]||0, m=p[1]||0;
-  const ap=h>=12?'PM':'AM';
-  const h12=h%12===0?12:h%12;
-  return String(h12).padStart(2,'0')+':'+String(m).padStart(2,'0')+' '+ap;
 }
 
 function tsFrom(t){
@@ -314,16 +316,16 @@ function tsFrom(t){
   const d=new Date(); d.setHours(p[0]||0,p[1]||0,0,0);
   return d.getTime();
 }
-/* Shutdown থেকে Withdraw পর্যন্ত সময়, যেমন "1 h 5 min" */
+
 function interruption(r){
   let start=r.ts;
-  if(start==null){                                   // পুরনো record এর জন্য
+  if(start==null){
     const dp=(r.date||'').split('/').map(Number);
     const tp=(r.time||'0:0').split(':').map(Number);
     start=new Date(dp[2],dp[1]-1,dp[0],tp[0],tp[1]).getTime();
   }
   let diff=tsFrom(time.value)-start;
-  if(diff<0) diff+=24*3600*1000;                     // মাঝরাত পার হলে
+  if(diff<0) diff+=24*3600*1000;
   const total=Math.round(diff/60000);
   const h=Math.floor(total/60), m=total%60;
   return h>0 ? h+' h '+m+' min' : m+' min';
@@ -346,7 +348,7 @@ function buildMsg(){
     if(!subSel.has(n))continue;
     const ss=picked('A',n,model.subs[n].ssa);
     const fd=picked('F',n,model.subs[n].feeders);
-    const sep=(mode==='SD')?': ':' : ';   // Shutdown এ "Substation:", Withdraw এ "Substation :"
+    const sep=(mode==='SD')?': ':' : ';
     s+='\nSubstation'+sep+n+'\n';
     s+='SSA'+sep+(ss.length?ss.join(', '):'-')+'\n\n';
     s+='*Feeder : '+(fd.length?fd.join(', '):'-')+'*\n';
@@ -375,7 +377,6 @@ function valid(){
   return true;
 }
 
-
 function afterSend(){
   if(mode==='SD'){
     records.push({
@@ -395,7 +396,6 @@ function afterSend(){
   nowTime();
   render();
 }
-
 
 function saveOnly(){
   if(!valid())return;
