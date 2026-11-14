@@ -57,6 +57,7 @@
   <div class="card"><h2>Substation</h2><div id="subs"></div></div>
   <div id="subDetails"></div>
   <div class="card" id="rolesCard" style="display:none"><h2>Lineman / Others</h2><div id="roles"></div></div>
+  <div class="card" id="reasonCard" style="display:none"><h2>Reason</h2><div id="reasons"></div></div>
 
   <div class="card"><h2>Message preview</h2><pre id="prev"></pre></div>
 
@@ -122,14 +123,20 @@ function parseCSV(t){
 }
 
 function buildModel(rows){
-  const m={subs:{},roles:{}};
+  const m={subs:{},roles:{},reasons:[]};
   if(!rows.length)return m;
   const hdr=rows[0].map(s=>(s||"").trim());
   const roleCols=[];
-  for(let i=3;i<hdr.length;i++){ if(hdr[i]){ roleCols.push([i,hdr[i]]); m.roles[hdr[i]]=[]; } }
+  let reasonCol=-1;
+  for(let i=3;i<hdr.length;i++){
+    if(!hdr[i])continue;
+    if(/^(reason|কারণ)$/i.test(hdr[i])) reasonCol=i;
+    else{ roleCols.push([i,hdr[i]]); m.roles[hdr[i]]=[]; }
+  }
   let cur="";
   for(let i=1;i<rows.length;i++){
     const r=rows[i].map(s=>(s||"").trim());
+    if(reasonCol>=0&&r[reasonCol]&&!m.reasons.includes(r[reasonCol])) m.reasons.push(r[reasonCol]);
     if(r[0]) cur=r[0];
     if(cur){
       if(!m.subs[cur]) m.subs[cur]={ssa:[],feeders:[]};
@@ -236,6 +243,10 @@ function render(){
   }
   document.getElementById('subDetails').innerHTML=h;
 
+  const reasons=model.reasons||[];
+  document.getElementById('reasonCard').style.display=reasons.length?'block':'none';
+  document.getElementById('reasons').innerHTML=reasons.map(x=>cb(`Z|reason|${x}`,x,sel.has(`Z|reason|${x}`))).join('');
+
   const roles=Object.keys(model.roles);
   document.getElementById('rolesCard').style.display=roles.length?'block':'none';
   document.getElementById('roles').innerHTML=roles.map(r=>{
@@ -337,7 +348,7 @@ function picked(prefix,second,list){
 
 function buildMsg(){
   const d=new Date().toLocaleDateString('en-GB');
-  let s=(mode==='SD'?'🔴 *SHUTDOWN*':'🟢 *WITHDRAW*')+'\n';
+  let s=(mode==='SD'?'🚫 *SHUTDOWN*':'✅ *WITHDRAW*')+'\n';
   s+='Date: '+d+'  Time: '+fmt12(time.value)+'\n';
   let intr='';
   if(mode==='WD'&&activeId!==null){
@@ -360,6 +371,8 @@ function buildMsg(){
     if(p.length) roleLines.push('*'+r+' : '+p.join(', ')+'*');
   }
   if(roleLines.length) s+='\n'+roleLines.join('\n')+'\n';
+  const rs=(model.reasons||[]).filter(x=>sel.has(`Z|reason|${x}`));
+  if(rs.length) s+='\nReason : '+rs.join(', ')+'\n';
   return s.trim();
 }
 
